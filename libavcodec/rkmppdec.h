@@ -131,7 +131,7 @@ static const AVClass x##_rkmpp_decoder_class = { \
 }; \
 const FFCodec ff_##x##_rkmpp_decoder = { \
     .p.name         = #x "_rkmpp", \
-    CODEC_LONG_NAME("Rockchip MPP (Media Process Platform) " #X " decoder"), \
+    .p.long_name    = ("Rockchip MPP (Media Process Platform) " #X " decoder"), \
     .p.type         = AVMEDIA_TYPE_VIDEO, \
     .p.id           = AV_CODEC_ID_##X, \
     .priv_data_size = sizeof(RKMPPDecContext), \
@@ -143,8 +143,7 @@ const FFCodec ff_##x##_rkmpp_decoder = { \
     .bsfs           = bsf_name, \
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING | \
                       AV_CODEC_CAP_HARDWARE, \
-    .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE | \
-                      FF_CODEC_CAP_SETS_FRAME_PROPS, \
+    .caps_internal  = FF_CODEC_CAP_SETS_FRAME_PROPS, \
     .p.pix_fmts     = rkmpp_dec_pix_fmts, \
     .hw_configs     = rkmpp_dec_hw_configs, \
     .p.wrapper_name = "rkmpp", \
