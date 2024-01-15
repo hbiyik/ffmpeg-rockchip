@@ -503,7 +503,8 @@ static int rkmpp_export_frame(AVCodecContext *avctx, AVFrame *frame, MppFrame mp
         layer->format = rkmpp_get_drm_afbc_format(mpp_fmt);
         layer->nb_planes = 1;
         layer->planes[0].offset = 0;
-        layer->planes[0].pitch  = mpp_frame_get_hor_stride(mpp_frame);
+        // TODO: handle scale factor per subsampling
+        layer->planes[0].pitch  = mpp_frame_get_hor_stride(mpp_frame) * 3 / 2;
 
         /* MPP specific AFBC src_x|y offsets, not memory address offsets */
         frame->crop_top  = mpp_frame_get_offset_y(mpp_frame);

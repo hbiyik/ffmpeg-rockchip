@@ -88,7 +88,7 @@ static int get_byte_stride(const AVDRMObjectDescriptor *object,
     plane1 = &layer->planes[1];
 
     *hs = plane0->pitch;
-    *vs = is_packed_fmt ?
+    *vs = (is_packed_fmt || layer->nb_planes == 1) ?
         ALIGN_DOWN(object->size / plane0->pitch, is_rgb ? 1 : 2) :
         (plane1->offset / plane0->pitch);
 
@@ -523,8 +523,7 @@ static MPPEncFrame *rkmpp_submit_frame(AVCodecContext *avctx, AVFrame *frame)
 
     is_afbc = drm_is_afbc(drm_desc->objects[0].format_modifier);
     if ((r->pix_fmt == AV_PIX_FMT_YUV420P ||
-         r->pix_fmt == AV_PIX_FMT_YUV422P ||
-         is_afbc) && (drm_frame->width % 2)) {
+         r->pix_fmt == AV_PIX_FMT_YUV422P) && (drm_frame->width % 2)) {
         av_log(avctx, AV_LOG_ERROR, "Unsupported width %d, not 2-aligned\n", drm_frame->width);
         goto exit;
     }
@@ -539,19 +538,23 @@ static MPPEncFrame *rkmpp_submit_frame(AVCodecContext *avctx, AVFrame *frame)
     mpp_frame_set_color_range(mpp_frame, avctx->color_range);
 
     pix_desc = av_pix_fmt_desc_get(r->pix_fmt);
-    if (!is_afbc) {
-        ret = get_byte_stride(&drm_desc->objects[0],
-                              &drm_desc->layers[0],
-                              (pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
-                              (pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
-                              &hor_stride, &ver_stride);
-        if (ret < 0 || !hor_stride || !ver_stride) {
-            av_log(avctx, AV_LOG_ERROR, "Failed to get frame strides\n");
-            goto exit;
-        }
+    ret = get_byte_stride(&drm_desc->objects[0],
+                          &drm_desc->layers[0],
+                          (pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
+                          (pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
+                          &hor_stride, &ver_stride);
+    if (ret < 0 || !hor_stride || !ver_stride) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to get frame strides\n");
+        goto exit;
+    }
 
-        mpp_frame_set_hor_stride(mpp_frame, hor_stride);
-        mpp_frame_set_ver_stride(mpp_frame, ver_stride);
+    mpp_frame_set_hor_stride(mpp_frame, hor_stride);
+    mpp_frame_set_ver_stride(mpp_frame, ver_stride);
+    if(is_afbc){
+        // TODO: handle scale factor per sub-sampling basis
+        if(pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR)
+            hor_stride = hor_stride * 2 / 3;
+        mpp_frame_set_fbc_hdr_stride(mpp_frame, hor_stride);
     }
 
     buf_info.type  = MPP_BUFFER_TYPE_DRM;
