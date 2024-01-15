@@ -190,7 +190,7 @@ static int rkmpp_set_enc_cfg_prep(AVCodecContext *avctx, AVFrame *frame)
     RKMPPEncContext *r = avctx->priv_data;
     MppEncCfg cfg = r->mcfg;
     MppFrameFormat mpp_fmt = r->mpp_fmt;
-    int ret;
+    int ret, is_afbc = 0;
     int hor_stride = 0, ver_stride = 0;
     const AVPixFmtDescriptor *pix_desc;
     const AVDRMFrameDescriptor *drm_desc;
@@ -206,25 +206,31 @@ static int rkmpp_set_enc_cfg_prep(AVCodecContext *avctx, AVFrame *frame)
         return AVERROR(ENOMEM);
 
     pix_desc = av_pix_fmt_desc_get(r->pix_fmt);
-    ret = get_byte_stride(&drm_desc->objects[0],
-                          &drm_desc->layers[0],
-                          (pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
-                          (pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
-                          &hor_stride, &ver_stride);
-    if (ret < 0 || !hor_stride || !ver_stride)
-        return AVERROR(EINVAL);
+    is_afbc = drm_is_afbc(drm_desc->objects[0].format_modifier);
+    if (!is_afbc) {
+        ret = get_byte_stride(&drm_desc->objects[0],
+                              &drm_desc->layers[0],
+                              (pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
+                              (pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
+                              &hor_stride, &ver_stride);
+        if (ret < 0 || !hor_stride || !ver_stride) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to get frame strides\n");
+            return AVERROR(EINVAL);
+        }
+
+        mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", hor_stride);
+        mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", ver_stride);
+    }
 
     mpp_enc_cfg_set_s32(cfg, "prep:width", avctx->width);
     mpp_enc_cfg_set_s32(cfg, "prep:height", avctx->height);
-    mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", hor_stride);
-    mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", ver_stride);
 
     mpp_enc_cfg_set_s32(cfg, "prep:colorspace", avctx->colorspace);
     mpp_enc_cfg_set_s32(cfg, "prep:colorprim", avctx->color_primaries);
     mpp_enc_cfg_set_s32(cfg, "prep:colortrc", avctx->color_trc);
     mpp_enc_cfg_set_s32(cfg, "prep:colorrange", avctx->color_range);
 
-    if (drm_is_afbc(drm_desc->objects[0].format_modifier)) {
+    if (is_afbc) {
         const AVDRMLayerDescriptor *layer = &drm_desc->layers[0];
         uint32_t drm_afbc_fmt = rkmpp_get_drm_afbc_format(mpp_fmt);
 
@@ -533,16 +539,20 @@ static MPPEncFrame *rkmpp_submit_frame(AVCodecContext *avctx, AVFrame *frame)
     mpp_frame_set_color_range(mpp_frame, avctx->color_range);
 
     pix_desc = av_pix_fmt_desc_get(r->pix_fmt);
-    ret = get_byte_stride(&drm_desc->objects[0],
-                          &drm_desc->layers[0],
-                          (pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
-                          (pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
-                          &hor_stride, &ver_stride);
-    if (ret < 0 || !hor_stride || !ver_stride)
-        goto exit;
+    if (!is_afbc) {
+        ret = get_byte_stride(&drm_desc->objects[0],
+                              &drm_desc->layers[0],
+                              (pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
+                              (pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
+                              &hor_stride, &ver_stride);
+        if (ret < 0 || !hor_stride || !ver_stride) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to get frame strides\n");
+            goto exit;
+        }
 
-    mpp_frame_set_hor_stride(mpp_frame, hor_stride);
-    mpp_frame_set_ver_stride(mpp_frame, ver_stride);
+        mpp_frame_set_hor_stride(mpp_frame, hor_stride);
+        mpp_frame_set_ver_stride(mpp_frame, ver_stride);
+    }
 
     buf_info.type  = MPP_BUFFER_TYPE_DRM;
     buf_info.fd    = drm_desc->objects[0].fd;
@@ -561,7 +571,7 @@ static MPPEncFrame *rkmpp_submit_frame(AVCodecContext *avctx, AVFrame *frame)
     if (is_afbc) {
         const AVDRMLayerDescriptor *layer = &drm_desc->layers[0];
         uint32_t drm_afbc_fmt = rkmpp_get_drm_afbc_format(mpp_fmt);
-        int afbc_offset_y = 0;
+        int afbc_offset_x = 0, afbc_offset_y = 0;
 
         if (drm_afbc_fmt != layer->format) {
             av_log(avctx, AV_LOG_ERROR, "Input format '%s' with AFBC modifier is not supported\n",
@@ -570,9 +580,13 @@ static MPPEncFrame *rkmpp_submit_frame(AVCodecContext *avctx, AVFrame *frame)
         }
         mpp_fmt |= MPP_FRAME_FBC_AFBC_V2;
 
-        if (layer->planes[0].offset > 0) {
-            afbc_offset_y = layer->planes[0].offset / hor_stride;
+        if (drm_frame->crop_top > 0) {
+            afbc_offset_y = drm_frame->crop_top;
             mpp_frame_set_offset_y(mpp_frame, afbc_offset_y);
+        }
+        if (drm_frame->crop_left > 0) {
+            afbc_offset_x = drm_frame->crop_left;
+            mpp_frame_set_offset_x(mpp_frame, afbc_offset_x);
         }
     }
     mpp_frame_set_fmt(mpp_frame, mpp_fmt);

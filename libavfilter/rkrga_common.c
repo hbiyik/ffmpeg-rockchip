@@ -348,7 +348,6 @@ static RGAFrame *submit_frame(RKRGAContext *r, AVFilterLink *inlink,
     int ret;
     const AVDRMFrameDescriptor *desc;
     const AVDRMLayerDescriptor *layer;
-    const AVDRMPlaneDescriptor *plane0;
     RGAFrame **frame_list = NULL;
     int is_afbc = 0;
 
@@ -374,13 +373,18 @@ static RGAFrame *submit_frame(RKRGAContext *r, AVFilterLink *inlink,
     if (desc->objects[0].fd < 0)
         return NULL;
 
-    ret = get_pixel_stride(&desc->objects[0],
-                           &desc->layers[0],
-                           (in_info->pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
-                           (in_info->pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
-                           in_info->bytes_pp, &w_stride, &h_stride);
-    if (ret < 0 || !w_stride || !h_stride)
-        return NULL;
+    is_afbc = drm_is_afbc(desc->objects[0].format_modifier);
+    if (!is_afbc) {
+        ret = get_pixel_stride(&desc->objects[0],
+                               &desc->layers[0],
+                               (in_info->pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
+                               (in_info->pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
+                               in_info->bytes_pp, &w_stride, &h_stride);
+        if (ret < 0 || !w_stride || !h_stride) {
+            av_log(ctx, AV_LOG_ERROR, "Failed to get frame strides\n");
+            return NULL;
+        }
+    }
 
     info.fd           = desc->objects[0].fd;
     info.format       = in_info->rga_fmt;
@@ -394,8 +398,6 @@ static RGAFrame *submit_frame(RKRGAContext *r, AVFilterLink *inlink,
         info.rotation = in_info->rotate_mode;
         info.blend    = (do_overlay && !pat_preproc) ? in_info->blend_mode : 0;
     }
-
-    is_afbc = drm_is_afbc(desc->objects[0].format_modifier);
 
     if (is_afbc && (r->is_rga2_used || out_info->scheduler_core == 0x4)) {
         av_log(ctx, AV_LOG_ERROR, "Input format '%s' with AFBC modifier is not supported by RGA2\n",
@@ -430,20 +432,22 @@ static RGAFrame *submit_frame(RKRGAContext *r, AVFilterLink *inlink,
                      in_info->act_w, in_info->act_h,
                      w_stride, h_stride, in_info->rga_fmt);
 
-    layer = &desc->layers[0];
-    plane0 = &layer->planes[0];
     if (is_afbc) {
-        int afbc_offset_y = 0;
-        int hor_stride = plane0->pitch;
+        int afbc_offset_x = 0, afbc_offset_y = 0;
         uint32_t drm_afbc_fmt = get_drm_afbc_format(in_info->pix_fmt);
 
-        if (layer->planes[0].offset > 0) {
-            afbc_offset_y = layer->planes[0].offset / hor_stride;
+        if (rga_frame->frame->crop_top > 0) {
+            afbc_offset_y = rga_frame->frame->crop_top;
             info.rect.yoffset += afbc_offset_y;
         }
+        if (rga_frame->frame->crop_left > 0) {
+            afbc_offset_x = rga_frame->frame->crop_left;
+            info.rect.xoffset += afbc_offset_x;
+        }
 
+        layer = &desc->layers[0];
         if (drm_afbc_fmt == layer->format) {
-            info.rect.wstride = FFALIGN(inlink->w, RK_RGA_AFBC_STRIDE_ALIGN);
+            info.rect.wstride = FFALIGN(inlink->w + afbc_offset_x, RK_RGA_AFBC_STRIDE_ALIGN);
             info.rect.hstride = FFALIGN(inlink->h + afbc_offset_y, RK_RGA_AFBC_STRIDE_ALIGN);
         } else {
             av_log(ctx, AV_LOG_ERROR, "Input format '%s' with AFBC modifier is not supported\n",
@@ -495,6 +499,8 @@ static RGAFrame *query_frame(RKRGAContext *r, AVFilterLink *outlink,
         av_log(ctx, AV_LOG_ERROR, "Failed to copy metadata fields from in to out: %d\n", ret);
         goto fail;
     }
+    out_frame->frame->crop_top  = 0;
+    out_frame->frame->crop_left = 0;
 
     if ((ret = av_hwframe_get_buffer(hw_frame_ctx, out_frame->frame, 0)) < 0) {
         av_log(ctx, AV_LOG_ERROR, "Cannot allocate an internal frame: %d\n", ret);
@@ -510,8 +516,10 @@ static RGAFrame *query_frame(RKRGAContext *r, AVFilterLink *outlink,
                            (out_info->pix_desc->flags & AV_PIX_FMT_FLAG_RGB),
                            (out_info->pix_desc->flags & AV_PIX_FMT_FLAG_PLANAR),
                            out_info->bytes_pp, &w_stride, &h_stride);
-    if (ret < 0 || !w_stride || !h_stride)
+    if (ret < 0 || !w_stride || !h_stride) {
+        av_log(ctx, AV_LOG_ERROR, "Failed to get frame strides\n");
         goto fail;
+    }
 
     info.fd           = desc->objects[0].fd;
     info.format       = out_info->rga_fmt;
