@@ -341,21 +341,6 @@ int av_image_check_sar(unsigned int w, unsigned int h, AVRational sar)
     return AVERROR(EINVAL);
 }
 
-static void image_copy_plane(uint8_t       *dst, ptrdiff_t dst_linesize,
-                             const uint8_t *src, ptrdiff_t src_linesize,
-                             ptrdiff_t bytewidth, int height)
-{
-    if (!dst || !src)
-        return;
-    av_assert0(FFABS(src_linesize) >= bytewidth);
-    av_assert0(FFABS(dst_linesize) >= bytewidth);
-    for (;height > 0; height--) {
-        memcpy(dst, src, bytewidth);
-        dst += dst_linesize;
-        src += src_linesize;
-    }
-}
-
 void av_image_copy_plane_uc_from(uint8_t *dst, ptrdiff_t dst_linesize,
                                  const uint8_t *src, ptrdiff_t src_linesize,
                                  ptrdiff_t bytewidth, int height)

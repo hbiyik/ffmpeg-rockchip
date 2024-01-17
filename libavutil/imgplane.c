@@ -16,18 +16,28 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVUTIL_IMGUTILS_INTERNAL_H
-#define AVUTIL_IMGUTILS_INTERNAL_H
+/**
+ * @file
+ * pure c image copy
+ */
+#include "avassert.h"
+#include "common.h"
+#include "error.h"
+#include "imgutils_internal.h"
+#include "string.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
-int ff_image_copy_plane_uc_from_x86(uint8_t       *dst, ptrdiff_t dst_linesize,
-                                    const uint8_t *src, ptrdiff_t src_linesize,
-                                    ptrdiff_t bytewidth, int height);
 
 void image_copy_plane(uint8_t *dst, ptrdiff_t dst_linesize,
-                      const uint8_t *src, ptrdiff_t src_linesize,
-                      ptrdiff_t bytewidth, int height);
-
-#endif /* AVUTIL_IMGUTILS_INTERNAL_H */
+                             const uint8_t *src, ptrdiff_t src_linesize,
+                             ptrdiff_t bytewidth, int height)
+{
+    if (!dst || !src)
+        return;
+    av_assert0(FFABS(src_linesize) >= bytewidth);
+    av_assert0(FFABS(dst_linesize) >= bytewidth);
+    for (;height > 0; height--) {
+        memcpy(dst, src, bytewidth);
+        dst += dst_linesize;
+        src += src_linesize;
+    }
+}
