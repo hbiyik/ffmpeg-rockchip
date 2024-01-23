@@ -58,6 +58,7 @@ isNBPS:
   gray9be
   gray9le
   nv15
+  nv20
   nv20be
   nv20le
   p010be
@@ -198,6 +199,7 @@ isYUV:
   nv12
   nv15
   nv16
+  nv20
   nv20be
   nv20le
   nv21
@@ -301,6 +303,7 @@ isPlanarYUV:
   nv12
   nv15
   nv16
+  nv20
   nv20be
   nv20le
   nv21
@@ -393,6 +396,7 @@ isSemiPlanarYUV:
   nv12
   nv15
   nv16
+  nv20
   nv20be
   nv20le
   nv21
@@ -783,6 +787,7 @@ Planar:
   nv12
   nv15
   nv16
+  nv20
   nv20be
   nv20le
   nv21
